@@ -127,6 +127,8 @@ def validate_restart_config(
         "path_dropout", "activation_dropout", "attn_dropout",
         "mask_ratio", "mask_token_id", "min_masked", "max_masked",
         "noise_std", "no_center_coords", "no_recenter_noisy",
+        "geometric_subtasks",
+        "lidi_matrix_key", "lidi_offsets_key", "lidi_values_key",
         "vip_vea_keys", "fukui_keys",
         "target", "targets", "split",
         "head_hidden_dim", "head_dropout",
@@ -134,6 +136,7 @@ def validate_restart_config(
     warn_keys = [
         "lr", "descriptor_lr", "task_lr", "weight_decay",
         "atom_weight", "coord_weight", "charge_weight",
+        "lidi_node_weight", "lidi_edge_weight", "lidi_conservation_weight",
         "vip_vea_weight", "fukui_weight",
         "batch_size", "num_workers", "train_h5", "val_h5",
         "freeze_backbone_epochs", "pretrained_ckpt", "data_root",

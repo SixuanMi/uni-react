@@ -35,6 +35,26 @@ configs/
 - **Data**: GDB13 molecular datasets
 - **Config**: `*/geometric.yaml`
 
+### Stage 1 LIDI Ablations (SingleMol templates)
+- `single_mol/geometric_ablation_baseline.yaml`:
+  atom-mask + coord-denoise (no charge)
+- `single_mol/geometric_ablation_lidi_node.yaml`:
+  baseline + LIDI diagonal (node) supervision
+- `single_mol/geometric_ablation_lidi_edge.yaml`:
+  baseline + LIDI off-diagonal (edge) supervision
+- `single_mol/geometric_ablation_lidi_full.yaml`:
+  baseline + node + edge + conservation supervision
+
+Recommended data prep flow for large RGD1-style files:
+1. Extract minimal fields from huge `fchk` + pair with LIDI txt:
+   - `scripts/extract_minimal_fchk_lidi.sh`
+2. Convert minimal files to stage-1 HDF5:
+   - `scripts/convert_fchk_lidi_to_pretrain_h5.py`
+
+LIDI reference docs:
+- `docs/lidi_h5_format.md` (production format and converter behavior)
+- `scripts/make_lidi_example_h5.py` (tiny synthetic example generator)
+
 ### Stage 2a: Electronic Structure
 - **Task**: VIP/VEA + Fukui indices prediction
 - **Data**: CDFT calculations (RGD1_CDFT for train, t1x_CDFT for val)

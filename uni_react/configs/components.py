@@ -34,6 +34,9 @@ class GeometricLossConfig:
     atom_weight: float = 1.0
     coord_weight: float = 1.0
     charge_weight: float = 1.0
+    lidi_node_weight: float = 0.0
+    lidi_edge_weight: float = 0.0
+    lidi_conservation_weight: float = 0.0
 
 
 @dataclass

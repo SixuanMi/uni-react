@@ -29,6 +29,13 @@ class H5SingleMolPretrainDataset(Dataset):
     Optional electronic-structure labels (direct regression):
       - global targets (per-frame), e.g. VIP/VEA
       - atom targets (per-atom), e.g. f+/f-/f0
+
+    Optional LIDI matrix labels for stage-1 ablation:
+      - Per-molecule dense matrix (N, N) where N = number of atoms
+      - Supported storage:
+        a) 3-D dataset: ``lidi_matrix`` or ``frames/lidi_matrix``
+        b) flattened values + frame offsets:
+           ``lidi_values`` + ``lidi_offsets`` (or ``frames/...`` variants)
     """
 
     def __init__(
@@ -48,6 +55,10 @@ class H5SingleMolPretrainDataset(Dataset):
         require_reactivity: bool = False,
         reactivity_global_keys: Optional[Sequence[str]] = None,
         reactivity_atom_keys: Optional[Sequence[str]] = None,
+        require_lidi: bool = False,
+        lidi_matrix_key: Optional[str] = None,
+        lidi_offsets_key: Optional[str] = None,
+        lidi_values_key: Optional[str] = None,
     ) -> None:
         super().__init__()
         if not h5_files:
@@ -80,6 +91,10 @@ class H5SingleMolPretrainDataset(Dataset):
         self.require_reactivity = bool(require_reactivity)
         self.reactivity_global_keys = tuple(reactivity_global_keys or ("vip", "vea"))
         self.reactivity_atom_keys = tuple(reactivity_atom_keys or ("f_plus", "f_minus", "f_zero"))
+        self.require_lidi = bool(require_lidi)
+        self.lidi_matrix_key = lidi_matrix_key
+        self.lidi_offsets_key = lidi_offsets_key
+        self.lidi_values_key = lidi_values_key
         if len(set(self.reactivity_global_keys)) != len(self.reactivity_global_keys):
             raise ValueError(f"Duplicate reactivity_global_keys: {self.reactivity_global_keys}")
         if len(set(self.reactivity_atom_keys)) != len(self.reactivity_atom_keys):
@@ -91,6 +106,8 @@ class H5SingleMolPretrainDataset(Dataset):
         #   "schema": str,
         #   "reactivity_global_paths": Dict[str, str],
         #   "reactivity_atom_paths": Dict[str, str],
+        #   "lidi": Dict[str, str],
+        #   "electron_count_path": Optional[str],
         # }
         self._file_meta: List[Dict] = []
         for path in self.h5_files:
@@ -101,6 +118,8 @@ class H5SingleMolPretrainDataset(Dataset):
                     "schema": schema,
                     "reactivity_global_paths": {},
                     "reactivity_atom_paths": {},
+                    "lidi": {},
+                    "electron_count_path": None,
                 }
                 if self.require_reactivity:
                     global_paths = self._resolve_reactivity_paths(
@@ -125,6 +144,25 @@ class H5SingleMolPretrainDataset(Dataset):
                     )
                     meta["reactivity_global_paths"] = global_paths
                     meta["reactivity_atom_paths"] = atom_paths
+                if self.require_lidi:
+                    lidi_paths = self._resolve_lidi_paths(
+                        h5=h5,
+                        schema=schema,
+                        matrix_key=self.lidi_matrix_key,
+                        offsets_key=self.lidi_offsets_key,
+                        values_key=self.lidi_values_key,
+                    )
+                    self._validate_lidi_shapes(
+                        h5=h5,
+                        n_frames=n_frames,
+                        lidi_paths=lidi_paths,
+                        file_path=path,
+                    )
+                    meta["lidi"] = lidi_paths
+                    meta["electron_count_path"] = self._resolve_electron_count_path(
+                        h5=h5,
+                        schema=schema,
+                    )
                 self._file_meta.append(meta)
 
         self._cum_frames = np.zeros(len(self._file_meta) + 1, dtype=np.int64)
@@ -216,6 +254,101 @@ class H5SingleMolPretrainDataset(Dataset):
             )
         return out
 
+    @classmethod
+    def _resolve_optional_dataset_path(
+        cls,
+        h5: h5py.File,
+        explicit_key: Optional[str],
+        candidates: Sequence[str],
+    ) -> Optional[str]:
+        if explicit_key:
+            path = explicit_key.lstrip("/")
+            return path if cls._dataset_exists(h5, path) else None
+        for path in candidates:
+            if cls._dataset_exists(h5, path):
+                return path
+        return None
+
+    @classmethod
+    def _resolve_lidi_paths(
+        cls,
+        h5: h5py.File,
+        schema: str,
+        matrix_key: Optional[str],
+        offsets_key: Optional[str],
+        values_key: Optional[str],
+    ) -> Dict[str, str]:
+        if schema == "stable_gen":
+            matrix_candidates = ("frames/lidi_matrix", "lidi_matrix")
+            offsets_candidates = (
+                "frames/lidi_offsets",
+                "lidi_offsets",
+                "frames/lidi_matrix_offsets",
+                "lidi_matrix_offsets",
+            )
+            values_candidates = (
+                "frames/lidi_values",
+                "lidi_values",
+                "frames/lidi_matrix_values",
+                "lidi_matrix_values",
+            )
+        else:
+            matrix_candidates = ("lidi_matrix", "frames/lidi_matrix")
+            offsets_candidates = (
+                "lidi_offsets",
+                "frames/lidi_offsets",
+                "lidi_matrix_offsets",
+                "frames/lidi_matrix_offsets",
+            )
+            values_candidates = (
+                "lidi_values",
+                "frames/lidi_values",
+                "lidi_matrix_values",
+                "frames/lidi_matrix_values",
+            )
+
+        matrix_path = cls._resolve_optional_dataset_path(
+            h5=h5, explicit_key=matrix_key, candidates=matrix_candidates
+        )
+        if matrix_path is not None:
+            return {"mode": "matrix3d", "matrix_path": matrix_path}
+
+        offsets_path = cls._resolve_optional_dataset_path(
+            h5=h5, explicit_key=offsets_key, candidates=offsets_candidates
+        )
+        values_path = cls._resolve_optional_dataset_path(
+            h5=h5, explicit_key=values_key, candidates=values_candidates
+        )
+        if offsets_path is not None and values_path is not None:
+            return {
+                "mode": "offset_values",
+                "offsets_path": offsets_path,
+                "values_path": values_path,
+            }
+
+        raise ValueError(
+            "Missing required LIDI datasets. Expected either:\n"
+            "  1) matrix dataset: lidi_matrix (or frames/lidi_matrix)\n"
+            "  2) flattened storage: lidi_offsets + lidi_values "
+            "(or frames/lidi_offsets + frames/lidi_values)"
+        )
+
+    @classmethod
+    def _resolve_electron_count_path(
+        cls,
+        h5: h5py.File,
+        schema: str,
+    ) -> Optional[str]:
+        candidates = (
+            ("frames/electron_count", "electron_count")
+            if schema == "stable_gen"
+            else ("electron_count", "frames/electron_count")
+        )
+        for path in candidates:
+            if cls._dataset_exists(h5, path):
+                return path
+        return None
+
     @staticmethod
     def _validate_reactivity_shapes(
         h5: h5py.File,
@@ -245,6 +378,53 @@ class H5SingleMolPretrainDataset(Dataset):
                     f"Reactivity atom dataset shape mismatch for {file_path}: "
                     f"{key} -> {path}, len={ds.shape[0]}, expected_atoms={n_atoms_total}"
                 )
+
+    @staticmethod
+    def _validate_lidi_shapes(
+        h5: h5py.File,
+        n_frames: int,
+        lidi_paths: Dict[str, str],
+        file_path: str,
+    ) -> None:
+        mode = lidi_paths.get("mode")
+        if mode == "matrix3d":
+            path = lidi_paths["matrix_path"]
+            ds = h5[path]
+            if ds.ndim != 3:
+                raise ValueError(
+                    f"LIDI matrix dataset must be 3-D in {file_path}: {path}, got ndim={ds.ndim}"
+                )
+            if ds.shape[0] != n_frames:
+                raise ValueError(
+                    f"LIDI matrix dataset frame mismatch in {file_path}: {path}, "
+                    f"frames={ds.shape[0]}, expected={n_frames}"
+                )
+            return
+
+        if mode == "offset_values":
+            offsets = h5[lidi_paths["offsets_path"]]
+            values = h5[lidi_paths["values_path"]]
+            if offsets.ndim != 1:
+                raise ValueError(
+                    f"LIDI offsets must be 1-D in {file_path}: {lidi_paths['offsets_path']}"
+                )
+            if int(offsets.shape[0]) != (n_frames + 1):
+                raise ValueError(
+                    f"LIDI offsets length mismatch in {file_path}: {lidi_paths['offsets_path']}, "
+                    f"len={offsets.shape[0]}, expected={n_frames + 1}"
+                )
+            if values.ndim != 1:
+                raise ValueError(
+                    f"LIDI values must be 1-D in {file_path}: {lidi_paths['values_path']}"
+                )
+            if int(offsets[-1]) > int(values.shape[0]):
+                raise ValueError(
+                    f"LIDI offsets overflow values length in {file_path}: "
+                    f"offset_end={int(offsets[-1])}, values_len={int(values.shape[0])}"
+                )
+            return
+
+        raise ValueError(f"Unsupported LIDI metadata mode in {file_path}: {mode!r}")
 
     def __len__(self) -> int:
         return int(self._cum_frames[-1])
@@ -311,6 +491,48 @@ class H5SingleMolPretrainDataset(Dataset):
             rng = np.random.default_rng(base_seed)
             self._worker_rngs[worker_id] = rng
         return rng
+
+    @staticmethod
+    def _read_lidi_matrix(
+        h5: h5py.File,
+        lidi_paths: Dict[str, str],
+        frame_idx: int,
+        num_atoms: int,
+        file_path: str,
+    ) -> np.ndarray:
+        mode = lidi_paths["mode"]
+        if mode == "matrix3d":
+            raw = np.asarray(
+                h5[lidi_paths["matrix_path"]][frame_idx],
+                dtype=np.float32,
+            )
+            if raw.shape[0] < num_atoms or raw.shape[1] < num_atoms:
+                raise ValueError(
+                    f"LIDI matrix too small for molecule in {file_path}#{frame_idx}: "
+                    f"matrix_shape={tuple(raw.shape)}, num_atoms={num_atoms}"
+                )
+            matrix = raw[:num_atoms, :num_atoms]
+        elif mode == "offset_values":
+            offsets = h5[lidi_paths["offsets_path"]]
+            start = int(offsets[frame_idx])
+            end = int(offsets[frame_idx + 1])
+            flat = np.asarray(
+                h5[lidi_paths["values_path"]][start:end],
+                dtype=np.float32,
+            )
+            expected = num_atoms * num_atoms
+            if int(flat.shape[0]) != expected:
+                raise ValueError(
+                    f"LIDI flattened segment size mismatch in {file_path}#{frame_idx}: "
+                    f"len={int(flat.shape[0])}, expected={expected} (=N*N, N={num_atoms})"
+                )
+            matrix = flat.reshape(num_atoms, num_atoms)
+        else:
+            raise ValueError(f"Unsupported LIDI mode in {file_path}: {mode!r}")
+
+        if not np.isfinite(matrix).all():
+            raise ValueError(f"Non-finite LIDI values found in {file_path}#{frame_idx}")
+        return matrix
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         file_i, local_idx = self._index_to_file(idx)
@@ -379,6 +601,21 @@ class H5SingleMolPretrainDataset(Dataset):
             "charges": torch.from_numpy(charge_values).float(),
             "charge_valid": torch.from_numpy(charge_valid),
         }
+        if self.require_lidi:
+            lidi = self._read_lidi_matrix(
+                h5=h5,
+                lidi_paths=meta["lidi"],
+                frame_idx=local_idx,
+                num_atoms=num_atoms,
+                file_path=path,
+            )
+            sample["lidi_matrix"] = torch.from_numpy(lidi).float()
+            electron_count_path = meta.get("electron_count_path")
+            if electron_count_path:
+                sample["electron_count"] = torch.tensor(
+                    float(h5[electron_count_path][local_idx]),
+                    dtype=torch.float32,
+                )
         if self.require_reactivity:
             reactivity_global = np.zeros((len(self.reactivity_global_keys),), dtype=np.float32)
             for i, key in enumerate(self.reactivity_global_keys):
@@ -414,6 +651,8 @@ def collate_fn_pretrain(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch
     batch_size = len(batch)
     max_atoms = max(item["atomic_numbers"].shape[0] for item in batch)
     has_reactivity = "reactivity_global" in batch[0]
+    has_lidi = "lidi_matrix" in batch[0]
+    has_electron_count = "electron_count" in batch[0]
 
     atomic_numbers = torch.zeros((batch_size, max_atoms), dtype=torch.long)
     input_atomic_numbers = torch.zeros((batch_size, max_atoms), dtype=torch.long)
@@ -430,12 +669,20 @@ def collate_fn_pretrain(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch
     reactivity_global = None
     reactivity_atom = None
     reactivity_atom_valid = None
+    lidi_matrix = None
+    lidi_valid = None
+    electron_count = None
     if has_reactivity:
         n_global = int(batch[0]["reactivity_global"].shape[0])
         n_atom = int(batch[0]["reactivity_atom"].shape[1])
         reactivity_global = torch.zeros((batch_size, n_global), dtype=torch.float32)
         reactivity_atom = torch.zeros((batch_size, max_atoms, n_atom), dtype=torch.float32)
         reactivity_atom_valid = torch.zeros((batch_size, max_atoms), dtype=torch.bool)
+    if has_lidi:
+        lidi_matrix = torch.zeros((batch_size, max_atoms, max_atoms), dtype=torch.float32)
+        lidi_valid = torch.zeros((batch_size, max_atoms, max_atoms), dtype=torch.bool)
+    if has_electron_count:
+        electron_count = torch.zeros((batch_size,), dtype=torch.float32)
 
     sample_ids: List[str] = []
     has_ids = "sample_id" in batch[0]
@@ -453,6 +700,16 @@ def collate_fn_pretrain(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch
         mask_positions[i, :n] = item["mask_positions"]
         charges[i, :n] = item["charges"]
         charge_valid[i, :n] = item["charge_valid"]
+        if has_lidi:
+            lm = item["lidi_matrix"]
+            if tuple(lm.shape) != (n, n):
+                raise ValueError(
+                    f"lidi_matrix shape mismatch at batch index {i}: got {tuple(lm.shape)}, expected ({n}, {n})"
+                )
+            lidi_matrix[i, :n, :n] = lm
+            lidi_valid[i, :n, :n] = True
+        if has_electron_count:
+            electron_count[i] = item["electron_count"]
         if has_reactivity:
             reactivity_global[i] = item["reactivity_global"]
             reactivity_atom[i, :n] = item["reactivity_atom"]
@@ -477,6 +734,11 @@ def collate_fn_pretrain(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch
         out["reactivity_global"] = reactivity_global
         out["reactivity_atom"] = reactivity_atom
         out["reactivity_atom_valid"] = reactivity_atom_valid
+    if has_lidi:
+        out["lidi_matrix"] = lidi_matrix
+        out["lidi_valid"] = lidi_valid
+    if has_electron_count:
+        out["electron_count"] = electron_count
     if has_ids:
         out["sample_ids"] = sample_ids
     return out

@@ -8,6 +8,7 @@ Atom-level heads
 ``atom_mask``       :class:`AtomMaskHead`
 ``coord_denoise``   :class:`CoordDenoiseHead`
 ``charge``          :class:`ChargeHead`
+``lidi``            :class:`LidiHead`
 ``vip_vea``         :class:`VipVeaHead`
 ``fukui``           :class:`FukuiHead`
 
@@ -22,6 +23,7 @@ from .coord_denoise import CoordDenoiseHead
 from .electronic_pipeline import ElectronicStructureTask
 from .fukui import FukuiHead
 from .geometric_pipeline import GeometricStructureTask
+from .lidi import LidiHead
 from .vip_vea import VipVeaHead
 
 __all__ = [
@@ -29,6 +31,7 @@ __all__ = [
     "AtomMaskHead",
     "CoordDenoiseHead",
     "ChargeHead",
+    "LidiHead",
     "VipVeaHead",
     "FukuiHead",
     # pipeline bundles

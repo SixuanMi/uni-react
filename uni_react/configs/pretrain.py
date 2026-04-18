@@ -74,9 +74,24 @@ class PretrainConfig:
     # ------------------------------------------------------------------
     # Loss weights (geometric_structure mode)
     # ------------------------------------------------------------------
+    geometric_subtasks: List[str] = field(
+        default_factory=lambda: ["atom_mask", "coord_denoise", "charge"]
+    )
+    """Geometric subtasks to enable: atom_mask, coord_denoise, charge, lidi."""
+
     atom_weight: float = 1.0
     coord_weight: float = 1.0
     charge_weight: float = 1.0
+    lidi_node_weight: float = 0.0
+    lidi_edge_weight: float = 0.0
+    lidi_conservation_weight: float = 0.0
+    lidi_hidden_dim: int = 256
+    """Hidden dimension for the LIDI prediction head."""
+
+    # Optional LIDI data-path overrides in HDF5
+    lidi_matrix_key: Optional[str] = None
+    lidi_offsets_key: Optional[str] = None
+    lidi_values_key: Optional[str] = None
 
     # ------------------------------------------------------------------
     # Loss weights (electronic_structure mode)
@@ -195,6 +210,28 @@ class PretrainConfig:
         
         if self.charge_weight < 0:
             raise ValueError(f"charge_weight must be >= 0, got {self.charge_weight}")
+
+        if self.lidi_node_weight < 0:
+            raise ValueError(f"lidi_node_weight must be >= 0, got {self.lidi_node_weight}")
+
+        if self.lidi_edge_weight < 0:
+            raise ValueError(f"lidi_edge_weight must be >= 0, got {self.lidi_edge_weight}")
+
+        if self.lidi_conservation_weight < 0:
+            raise ValueError(
+                f"lidi_conservation_weight must be >= 0, got {self.lidi_conservation_weight}"
+            )
+
+        if self.lidi_hidden_dim <= 0:
+            raise ValueError(f"lidi_hidden_dim must be > 0, got {self.lidi_hidden_dim}")
+
+        valid_geometric_subtasks = {"atom_mask", "coord_denoise", "charge", "lidi"}
+        unknown_subtasks = sorted(set(self.geometric_subtasks) - valid_geometric_subtasks)
+        if unknown_subtasks:
+            raise ValueError(
+                f"Unknown geometric_subtasks: {unknown_subtasks}. "
+                f"Valid values: {sorted(valid_geometric_subtasks)}"
+            )
         
         if self.vip_vea_weight < 0:
             raise ValueError(f"vip_vea_weight must be >= 0, got {self.vip_vea_weight}")
@@ -208,6 +245,9 @@ class PretrainConfig:
             raise ValueError(
                 f"train_mode must be one of {valid_modes}, got {self.train_mode!r}"
             )
+
+        if self.train_mode == "geometric_structure" and len(self.geometric_subtasks) == 0:
+            raise ValueError("geometric_subtasks must contain at least one task for geometric training.")
         
         # LR scheduler validation
         valid_schedulers = {"cosine", "linear", "none"}

@@ -25,13 +25,27 @@ class GeometricStructureLoss:
         atom_weight: float = 1.0,
         coord_weight: float = 1.0,
         charge_weight: float = 1.0,
+        lidi_node_weight: float = 0.0,
+        lidi_edge_weight: float = 0.0,
+        lidi_conservation_weight: float = 0.0,
     ) -> None:
         self.atom_weight = float(atom_weight)
         self.coord_weight = float(coord_weight)
         self.charge_weight = float(charge_weight)
+        self.lidi_node_weight = float(lidi_node_weight)
+        self.lidi_edge_weight = float(lidi_edge_weight)
+        self.lidi_conservation_weight = float(lidi_conservation_weight)
 
     def metric_keys(self) -> Tuple[str, ...]:
-        return ("loss", "atom_loss", "coord_loss", "charge_loss")
+        return (
+            "loss",
+            "atom_loss",
+            "coord_loss",
+            "charge_loss",
+            "lidi_node_loss",
+            "lidi_edge_loss",
+            "lidi_conservation_loss",
+        )
 
     def __call__(
         self,
@@ -66,16 +80,30 @@ class GeometricStructureLoss:
         if "charge_pred" in outputs and "charges" in batch:
             charge_loss = self._charge_loss(outputs, batch)
 
+        lidi_node_loss = zero
+        lidi_edge_loss = zero
+        lidi_conservation_loss = zero
+        if "lidi_pred" in outputs and "lidi_matrix" in batch:
+            lidi_node_loss = self._lidi_node_loss(outputs, batch)
+            lidi_edge_loss = self._lidi_edge_loss(outputs, batch)
+            lidi_conservation_loss = self._lidi_conservation_loss(outputs, batch)
+
         total = (
             self.atom_weight * atom_loss
             + self.coord_weight * coord_loss
             + self.charge_weight * charge_loss
+            + self.lidi_node_weight * lidi_node_loss
+            + self.lidi_edge_weight * lidi_edge_loss
+            + self.lidi_conservation_weight * lidi_conservation_loss
         )
         return {
             "loss": total,
             "atom_loss": atom_loss,
             "coord_loss": coord_loss,
             "charge_loss": charge_loss,
+            "lidi_node_loss": lidi_node_loss,
+            "lidi_edge_loss": lidi_edge_loss,
+            "lidi_conservation_loss": lidi_conservation_loss,
         }
 
     # ------------------------------------------------------------------
@@ -168,3 +196,67 @@ class GeometricStructureLoss:
             
             return (loss * valid).sum() / num_valid
         return loss.mean()
+
+    @staticmethod
+    def _lidi_pair_valid_mask(outputs: Dict[str, Tensor], batch: Dict[str, Tensor]) -> Tensor:
+        pred = outputs["lidi_pred"]
+        bsz, n_atoms, _ = pred.shape
+        valid = torch.ones((bsz, n_atoms), dtype=torch.bool, device=pred.device)
+
+        atom_padding = batch.get("atom_padding")
+        if isinstance(atom_padding, Tensor):
+            valid = valid & (~atom_padding.to(device=pred.device))
+
+        pair_valid = valid[:, :, None] & valid[:, None, :]
+        lidi_valid = batch.get("lidi_valid")
+        if isinstance(lidi_valid, Tensor):
+            pair_valid = pair_valid & lidi_valid.to(device=pred.device, dtype=torch.bool)
+        return pair_valid
+
+    @classmethod
+    def _lidi_node_loss(cls, outputs: Dict[str, Tensor], batch: Dict[str, Tensor]) -> Tensor:
+        import torch.nn.functional as F
+
+        pred = outputs["lidi_pred"]
+        target = batch["lidi_matrix"].to(device=pred.device, dtype=pred.dtype)
+        pair_valid = cls._lidi_pair_valid_mask(outputs, batch)
+        diag_mask = torch.eye(pred.shape[1], dtype=torch.bool, device=pred.device).unsqueeze(0)
+        node_mask = pair_valid & diag_mask
+        if node_mask.any():
+            return F.mse_loss(pred[node_mask], target[node_mask])
+        return pred.sum() * 0.0
+
+    @classmethod
+    def _lidi_edge_loss(cls, outputs: Dict[str, Tensor], batch: Dict[str, Tensor]) -> Tensor:
+        import torch.nn.functional as F
+
+        pred = outputs["lidi_pred"]
+        target = batch["lidi_matrix"].to(device=pred.device, dtype=pred.dtype)
+        pair_valid = cls._lidi_pair_valid_mask(outputs, batch)
+        diag_mask = torch.eye(pred.shape[1], dtype=torch.bool, device=pred.device).unsqueeze(0)
+        edge_mask = pair_valid & (~diag_mask)
+        if edge_mask.any():
+            return F.mse_loss(pred[edge_mask], target[edge_mask])
+        return pred.sum() * 0.0
+
+    @classmethod
+    def _lidi_conservation_loss(cls, outputs: Dict[str, Tensor], batch: Dict[str, Tensor]) -> Tensor:
+        import torch.nn.functional as F
+
+        pred = outputs["lidi_pred"]
+        target = batch["lidi_matrix"].to(device=pred.device, dtype=pred.dtype)
+        pair_valid = cls._lidi_pair_valid_mask(outputs, batch).to(dtype=pred.dtype)
+        pred_masked = pred * pair_valid
+        pred_total = pred_masked.sum(dim=(1, 2))
+        pred_diag = torch.diagonal(pred_masked, dim1=1, dim2=2).sum(dim=1)
+        pred_electron = 0.5 * (pred_total + pred_diag)
+
+        electron_count = batch.get("electron_count")
+        if isinstance(electron_count, Tensor):
+            target_electron = electron_count.to(device=pred.device, dtype=pred.dtype)
+        else:
+            target_masked = target * pair_valid
+            target_total = target_masked.sum(dim=(1, 2))
+            target_diag = torch.diagonal(target_masked, dim1=1, dim2=2).sum(dim=1)
+            target_electron = 0.5 * (target_total + target_diag)
+        return F.mse_loss(pred_electron, target_electron)

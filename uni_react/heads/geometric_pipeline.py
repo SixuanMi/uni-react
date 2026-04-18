@@ -1,4 +1,13 @@
-"""Geometric-structure pretraining pipeline (atom mask + coord denoise + charge)."""
+"""Geometric-structure pretraining pipeline.
+
+Default subtasks:
+  - atom mask
+  - coordinate denoise
+  - charge
+
+Optional subtask:
+  - LIDI matrix prediction
+"""
 from typing import Dict, Iterable, Optional, Set
 
 import torch
@@ -7,6 +16,7 @@ from torch import Tensor
 from .atom_mask import AtomMaskHead
 from .charge import ChargeHead
 from .coord_denoise import CoordDenoiseHead
+from .lidi import LidiHead
 
 
 class GeometricStructureTask(torch.nn.Module):
@@ -20,11 +30,18 @@ class GeometricStructureTask(torch.nn.Module):
     name = "geometric_structure"
     default_subtasks = ("atom_mask", "coord_denoise", "charge")
 
-    def __init__(self, emb_dim: int, atom_vocab_size: int) -> None:
+    def __init__(
+        self,
+        emb_dim: int,
+        atom_vocab_size: int,
+        enable_lidi: bool = False,
+        lidi_hidden_dim: int = 256,
+    ) -> None:
         super().__init__()
         self.atom_mask    = AtomMaskHead(emb_dim=emb_dim, atom_vocab_size=atom_vocab_size)
         self.coord_denoise = CoordDenoiseHead(emb_dim=emb_dim)
         self.charge        = ChargeHead(emb_dim=emb_dim)
+        self.lidi = LidiHead(emb_dim=emb_dim, hidden_dim=lidi_hidden_dim) if enable_lidi else None
 
     @staticmethod
     def _normalize_subtasks(
@@ -42,6 +59,12 @@ class GeometricStructureTask(torch.nn.Module):
         if "atom_mask"    in st: out.update(self.atom_mask(descriptors))
         if "coord_denoise" in st: out.update(self.coord_denoise(descriptors))
         if "charge"        in st: out.update(self.charge(descriptors))
+        if "lidi" in st:
+            if self.lidi is None:
+                raise RuntimeError(
+                    "Subtask 'lidi' requested but LIDI head is not enabled in GeometricStructureTask."
+                )
+            out.update(self.lidi(descriptors))
         return out
 
     @staticmethod

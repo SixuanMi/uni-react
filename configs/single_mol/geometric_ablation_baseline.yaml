@@ -1,0 +1,59 @@
+# Stage-1 Ablation A: baseline (atom mask + coord denoise), no charge, no LIDI
+# Run:
+# python -m uni_react.train_pretrain_geometric \
+#   --config configs/single_mol/geometric_ablation_baseline.yaml
+
+train_mode: geometric_structure
+
+train_h5:
+  - RGD1_stage1_lidi_train.h5
+val_h5:
+  - RGD1_stage1_lidi_val.h5
+batch_size: 128
+num_workers: 8
+
+mask_ratio: 0.15
+mask_token_id: 94
+min_masked: 1
+max_masked: 0
+noise_std: 0.1
+no_center_coords: false
+no_recenter_noisy: false
+
+encoder_type: single_mol
+emb_dim: 256
+inv_layer: 2
+se3_layer: 4
+heads: 8
+atom_vocab_size: 128
+cutoff: 5.0
+num_kernel: 128
+path_dropout: 0.1
+activation_dropout: 0.1
+attn_dropout: 0.1
+
+# Only baseline subtasks
+geometric_subtasks:
+  - atom_mask
+  - coord_denoise
+
+atom_weight: 1.0
+coord_weight: 1.0
+charge_weight: 0.0
+lidi_node_weight: 0.0
+lidi_edge_weight: 0.0
+lidi_conservation_weight: 0.0
+lidi_hidden_dim: 256
+
+epochs: 100
+lr: 1.0e-4
+weight_decay: 1.0e-2
+grad_clip: 1.0
+warmup_steps: 1200
+lr_scheduler: cosine
+
+device: cuda
+seed: 42
+out_dir: runs/ablation_stage1_baseline
+save_every: 5
+save_optimizer: true

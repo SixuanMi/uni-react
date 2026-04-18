@@ -76,6 +76,16 @@ class PretrainTrainer(BaseTrainer):
             if cfg.train_mode in {"cdft", "electronic_structure"}
             else cfg.train_mode
         )
+        self._active_geometric_subtasks = tuple(cfg.geometric_subtasks)
+        self._require_lidi = (
+            self._active_task == "geometric_structure"
+            and (
+                "lidi" in self._active_geometric_subtasks
+                or cfg.lidi_node_weight > 0
+                or cfg.lidi_edge_weight > 0
+                or cfg.lidi_conservation_weight > 0
+            )
+        )
 
         # Build data loaders
         max_masked = None if cfg.max_masked <= 0 else cfg.max_masked
@@ -93,6 +103,10 @@ class PretrainTrainer(BaseTrainer):
             require_reactivity=(self._active_task == "electronic_structure"),
             reactivity_global_keys=cfg.vip_vea_keys,
             reactivity_atom_keys=cfg.fukui_keys,
+            require_lidi=self._require_lidi,
+            lidi_matrix_key=cfg.lidi_matrix_key,
+            lidi_offsets_key=cfg.lidi_offsets_key,
+            lidi_values_key=cfg.lidi_values_key,
         )
         train_dataset = build_pretrain_dataset(cfg.train_h5, **dataset_kwargs)
 
@@ -166,6 +180,11 @@ class PretrainTrainer(BaseTrainer):
                 coords_noisy=batch["coords_noisy"],
                 atom_padding=batch["atom_padding"],
                 active_pipeline_tasks=(self._active_task,),
+                active_geometric_subtasks=(
+                    self._active_geometric_subtasks
+                    if self._active_task == "geometric_structure"
+                    else None
+                ),
             )
             losses = self.loss_fn(outputs, batch)
             losses["loss"].backward()
@@ -226,6 +245,11 @@ class PretrainTrainer(BaseTrainer):
                 coords_noisy=batch["coords_noisy"],
                 atom_padding=batch["atom_padding"],
                 active_pipeline_tasks=(self._active_task,),
+                active_geometric_subtasks=(
+                    self._active_geometric_subtasks
+                    if self._active_task == "geometric_structure"
+                    else None
+                ),
             )
             losses = self.loss_fn(outputs, batch)
             bs = batch["input_atomic_numbers"].shape[0]

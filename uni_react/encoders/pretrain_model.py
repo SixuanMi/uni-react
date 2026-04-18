@@ -42,6 +42,8 @@ class SingleMolPretrainNet(torch.nn.Module):
         enable_electronic_structure_task: bool = False,
         electronic_structure_vip_vea_dim: int = 2,
         electronic_structure_fukui_dim: int = 3,
+        enable_lidi_task: bool = False,
+        geometric_lidi_hidden_dim: int = 256,
         encoder: Optional[torch.nn.Module] = None,
     ) -> None:
         super().__init__()
@@ -62,6 +64,8 @@ class SingleMolPretrainNet(torch.nn.Module):
         self.tasks = torch.nn.ModuleDict({
             "geometric_structure": GeometricStructureTask(
                 emb_dim=emb_dim, atom_vocab_size=atom_vocab_size,
+                enable_lidi=enable_lidi_task,
+                lidi_hidden_dim=geometric_lidi_hidden_dim,
             ),
         })
         if enable_electronic_structure_task:
@@ -115,6 +119,7 @@ class SingleMolPretrainNet(torch.nn.Module):
         coords_noisy: torch.Tensor,
         atom_padding: Optional[torch.Tensor] = None,
         active_pipeline_tasks: Optional[Iterable[str]] = None,
+        active_geometric_subtasks: Optional[Iterable[str]] = None,
     ) -> Dict[str, torch.Tensor]:
         descriptors = self.extract_descriptors(
             input_atomic_numbers=input_atomic_numbers,
@@ -127,7 +132,15 @@ class SingleMolPretrainNet(torch.nn.Module):
         for task_name in pipeline_tasks:
             if task_name not in self.tasks:
                 raise KeyError(f"Unknown pipeline task: {task_name!r}")
-            out.update(self.tasks[task_name](descriptors))
+            if task_name == "geometric_structure":
+                out.update(
+                    self.tasks[task_name](
+                        descriptors,
+                        active_subtasks=active_geometric_subtasks,
+                    )
+                )
+            else:
+                out.update(self.tasks[task_name](descriptors))
         for name, head in self.task_atom_heads.items():
             out[name] = head(descriptors["node_feats"])
         for name, head in self.task_graph_heads.items():
