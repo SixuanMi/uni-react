@@ -20,14 +20,16 @@ def init_distributed(requested_device: str) -> Tuple[bool, int, int, int, torch.
     if requested_device == "cuda" and torch.cuda.is_available():
         if distributed:
             torch.cuda.set_device(local_rank)
+            cuda_device = torch.device("cuda", local_rank)
             try:
                 dist.init_process_group(
-                    backend="nccl", init_method="env://", device_id=local_rank
+                    backend="nccl", init_method="env://", device_id=cuda_device
                 )
-            except TypeError:
-                # Older PyTorch versions do not accept device_id.
+            except (TypeError, AttributeError):
+                # Older PyTorch versions may not accept `device_id`.
+                # Some releases also error when the argument type is unsupported.
                 dist.init_process_group(backend="nccl", init_method="env://")
-            device = torch.device("cuda", local_rank)
+            device = cuda_device
         else:
             device = torch.device("cuda")
     else:

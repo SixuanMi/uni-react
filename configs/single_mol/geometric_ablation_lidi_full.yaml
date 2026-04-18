@@ -9,8 +9,8 @@ train_h5:
   - RGD1_stage1_lidi_train.h5
 val_h5:
   - RGD1_stage1_lidi_val.h5
-batch_size: 128
-num_workers: 8
+batch_size: 192
+num_workers: 4
 
 mask_ratio: 0.15
 mask_token_id: 94
@@ -46,14 +46,15 @@ lidi_conservation_weight: 0.1
 lidi_hidden_dim: 256
 
 epochs: 100
-lr: 1.0e-4
+lr: 1.5e-4
 weight_decay: 1.0e-2
 grad_clip: 1.0
-warmup_steps: 1200
+warmup_steps: 800
 lr_scheduler: cosine
 
 device: cuda
 seed: 42
 out_dir: runs/ablation_stage1_lidi_full
-save_every: 5
+save_every: 10
+log_interval: 300
 save_optimizer: true
