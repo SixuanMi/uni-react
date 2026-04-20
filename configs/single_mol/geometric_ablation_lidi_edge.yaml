@@ -43,6 +43,12 @@ charge_weight: 0.0
 lidi_node_weight: 0.0
 lidi_edge_weight: 0.3
 lidi_conservation_weight: 0.0
+lidi_reduce: per_molecule
+loss_balance_mode: ema
+loss_ema_beta: 0.98
+loss_balance_eps: 1.0e-6
+lidi_edge_transform: asinh
+lidi_edge_scale: 1.0e-2
 lidi_hidden_dim: 256
 
 epochs: 100

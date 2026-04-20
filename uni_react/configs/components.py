@@ -37,6 +37,12 @@ class GeometricLossConfig:
     lidi_node_weight: float = 0.0
     lidi_edge_weight: float = 0.0
     lidi_conservation_weight: float = 0.0
+    lidi_reduce: str = "global"
+    loss_balance_mode: str = "fixed"
+    loss_ema_beta: float = 0.98
+    loss_balance_eps: float = 1e-6
+    lidi_edge_transform: str = "none"
+    lidi_edge_scale: float = 1e-2
 
 
 @dataclass

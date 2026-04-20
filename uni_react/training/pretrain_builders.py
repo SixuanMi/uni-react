@@ -84,6 +84,12 @@ def build_pretrain_loss(cfg: PretrainConfig, train_mode: str):
             "lidi_node_weight": cfg.lidi_node_weight,
             "lidi_edge_weight": cfg.lidi_edge_weight,
             "lidi_conservation_weight": cfg.lidi_conservation_weight,
+            "lidi_reduce": cfg.lidi_reduce,
+            "loss_balance_mode": cfg.loss_balance_mode,
+            "loss_ema_beta": cfg.loss_ema_beta,
+            "loss_balance_eps": cfg.loss_balance_eps,
+            "lidi_edge_transform": cfg.lidi_edge_transform,
+            "lidi_edge_scale": cfg.lidi_edge_scale,
         })
     if train_mode == "cdft":
         return LOSS_REGISTRY.build({

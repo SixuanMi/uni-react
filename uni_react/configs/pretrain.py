@@ -85,6 +85,18 @@ class PretrainConfig:
     lidi_node_weight: float = 0.0
     lidi_edge_weight: float = 0.0
     lidi_conservation_weight: float = 0.0
+    lidi_reduce: str = "global"
+    """Reduction for LIDI node/edge losses: ``global`` or ``per_molecule``."""
+    loss_balance_mode: str = "fixed"
+    """LIDI loss balancing mode: ``fixed`` or ``ema``."""
+    loss_ema_beta: float = 0.98
+    """EMA decay for dynamic loss balancing when ``loss_balance_mode=ema``."""
+    loss_balance_eps: float = 1e-6
+    """Numerical floor for balanced-loss denominator."""
+    lidi_edge_transform: str = "none"
+    """Optional transform for edge labels/predictions: ``none`` or ``asinh``."""
+    lidi_edge_scale: float = 1e-2
+    """Scale used by ``asinh(x / scale)`` edge transform."""
     lidi_hidden_dim: int = 256
     """Hidden dimension for the LIDI prediction head."""
 
@@ -221,6 +233,33 @@ class PretrainConfig:
             raise ValueError(
                 f"lidi_conservation_weight must be >= 0, got {self.lidi_conservation_weight}"
             )
+
+        valid_lidi_reduce = {"global", "per_molecule"}
+        if self.lidi_reduce not in valid_lidi_reduce:
+            raise ValueError(
+                f"lidi_reduce must be one of {valid_lidi_reduce}, got {self.lidi_reduce!r}"
+            )
+
+        valid_loss_balance = {"fixed", "ema"}
+        if self.loss_balance_mode not in valid_loss_balance:
+            raise ValueError(
+                f"loss_balance_mode must be one of {valid_loss_balance}, got {self.loss_balance_mode!r}"
+            )
+
+        if not 0.0 <= self.loss_ema_beta < 1.0:
+            raise ValueError(f"loss_ema_beta must be in [0, 1), got {self.loss_ema_beta}")
+
+        if self.loss_balance_eps <= 0:
+            raise ValueError(f"loss_balance_eps must be > 0, got {self.loss_balance_eps}")
+
+        valid_edge_transform = {"none", "asinh"}
+        if self.lidi_edge_transform not in valid_edge_transform:
+            raise ValueError(
+                f"lidi_edge_transform must be one of {valid_edge_transform}, got {self.lidi_edge_transform!r}"
+            )
+
+        if self.lidi_edge_scale <= 0:
+            raise ValueError(f"lidi_edge_scale must be > 0, got {self.lidi_edge_scale}")
 
         if self.lidi_hidden_dim <= 0:
             raise ValueError(f"lidi_hidden_dim must be > 0, got {self.lidi_hidden_dim}")
